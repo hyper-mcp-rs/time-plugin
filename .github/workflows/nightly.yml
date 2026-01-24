@@ -139,7 +139,7 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository }}"
           echo "nightly_ref=${IMAGE}:nightly" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push multi-arch image (just copies plugin.wasm)
+      - name: Build and push image (just copies plugin.wasm)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -150,7 +150,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.nightly_ref }}
 
-      - name: Resolve nightly multi-arch digest
+      - name: Resolve nightly digest
         id: digest
         shell: bash
         run: |
