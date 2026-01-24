@@ -36,17 +36,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push plugin images (on amd64 only)
+      - name: Build and push plugin image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Sign image by digest
+        shell: bash
         run: |
-          base_image="ghcr.io/${{ github.repository }}"
+          set -euo pipefail
 
-          docker build -t $base_image:${{ github.ref_name }} -t $base_image:latest .
+          DIGEST="${{ steps.build.outputs.digest }}"
+          IMAGE="ghcr.io/${{ github.repository }}"
 
-          docker push $base_image:${{ github.ref_name }}
-          docker push $base_image:latest
+          echo "Signing ${IMAGE}@${DIGEST}"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
 
-          cosign sign --yes $base_image:${{ github.ref_name }}
-          cosign sign --yes $base_image:latest
+          echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
@@ -62,11 +74,14 @@ jobs:
             Included:
             - Plugin image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
 
+            ✅ Immutable digest (recommended for pinning):
+            - `ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}`
+
             All container images are signed with Cosign. Verify with:
 
             ```bash
             cosign verify \
               --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+              ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}
             ```

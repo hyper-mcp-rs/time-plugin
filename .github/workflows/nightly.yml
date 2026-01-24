@@ -38,12 +38,28 @@ jobs:
 
       # we dont need to build multi-arch plugin images as they are wasm32-wasip1
       # so we can just build amd64 and push it to the registry
-      - name: Build and push plugin images
+      - name: Build and push plugin image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}:nightly
+
+      - name: Sign image by digest
+        shell: bash
         run: |
-          image_name="ghcr.io/${{ github.repository }}:nightly"
-          docker build -t $image_name .
-          docker push $image_name
-          cosign sign --yes $image_name
+          set -euo pipefail
+
+          DIGEST="${{ steps.build.outputs.digest }}"
+          IMAGE="ghcr.io/${{ github.repository }}"
+
+          echo "Signing ${IMAGE}@${DIGEST}"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+          echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Create new nightly release
         id: create_release
@@ -60,10 +76,13 @@ jobs:
             This release includes:
             - Plugin image: `ghcr.io/${{ github.repository }}:nightly`
 
+            ✅ Immutable digest (recommended for pinning):
+            - `ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}`
+
             All container images are signed with Cosign. Verify the image like this:
             ```bash
             cosign verify \
               --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/nightly.yml@refs/heads/main" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              ghcr.io/${{ github.repository }}:nightly
+              ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}
             ```
