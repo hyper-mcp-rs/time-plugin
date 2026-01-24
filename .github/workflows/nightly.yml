@@ -9,8 +9,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # 0) Move/force the "nightly" tag to main and delete the prior GH release.
+  prepare-nightly-release:
+    name: Prepare nightly tag + delete prior release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set nightly tag to latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git tag -f nightly origin/main
+          git push -f origin nightly
+
+      - name: Delete existing nightly release (if any)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete nightly --yes || true
+
   build-plugin:
+    name: Build and sign nightly plugin
     environment: staging
+    needs: prepare-nightly-release
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -20,6 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
+          ref: nightly
           fetch-depth: 0
           submodules: true
 
@@ -66,6 +94,40 @@ jobs:
 
           echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
+      - name: Write release notes (with immutable digest)
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository }}"
+          NIGHTLY_DIGEST="${{ env.IMAGE_DIGEST }}"
+          SHA="${GITHUB_SHA}"
+
+          cat > release-body.md <<EOF
+          Nightly build from \`main\`.
+
+          Commit:
+          - \`${SHA}\`
+
+          Container image (tag):
+          - \`${IMAGE}:nightly\`
+
+          ✅ Immutable digest (recommended for pinning):
+          - \`${IMAGE}@${NIGHTLY_DIGEST}\`
+
+          All container images are signed with Cosign. Verify the **immutable digest** with:
+
+          \`\`\`bash
+          cosign verify \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/nightly.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ${IMAGE}@${NIGHTLY_DIGEST}
+          \`\`\`
+          EOF
+
+          echo "body_path=release-body.md" >> "$GITHUB_OUTPUT"
+
       - name: Create new nightly release
         id: create_release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
@@ -75,19 +137,5 @@ jobs:
           draft: false
           prerelease: true
           generate_release_notes: true
-          body: |
-            Nightly build from `main` branch.
-
-            This release includes:
-            - Plugin image: `ghcr.io/${{ github.repository }}:nightly`
-
-            ✅ Immutable digest (recommended for pinning):
-            - `ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}`
-
-            All container images are signed with Cosign. Verify the image like this:
-            ```bash
-            cosign verify \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/nightly.yml@refs/heads/main" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}
-            ```
+          preserve_order: true
+          body_path: ${{ steps.notes.outputs.body_path }}

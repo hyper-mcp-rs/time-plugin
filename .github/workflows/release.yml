@@ -65,6 +65,37 @@ jobs:
 
           echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
+      - name: Write release notes (with immutable digest)
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ github.ref_name }}"
+          IMAGE="ghcr.io/${{ github.repository }}"
+          TAG_DIGEST="${{ env.IMAGE_DIGEST }}"
+
+          cat > release-body.md <<EOF
+          Final release for \`${TAG}\`.
+
+          Included:
+          - Plugin image: \`${IMAGE}:${TAG}\`
+
+          ✅ Immutable digest (recommended for pinning):
+          - \`${IMAGE}@${TAG_DIGEST}\`
+
+          All container images are signed with Cosign. Verify with:
+
+          \`\`\`bash
+          cosign verify \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${TAG}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ${IMAGE}@${TAG_DIGEST}
+          \`\`\`
+          EOF
+
+          echo "body_path=release-body.md" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
@@ -73,20 +104,5 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          body: |
-            Final release for `${{ github.ref_name }}`.
-
-            Included:
-            - Plugin image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
-
-            ✅ Immutable digest (recommended for pinning):
-            - `ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}`
-
-            All container images are signed with Cosign. Verify with:
-
-            ```bash
-            cosign verify \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              ghcr.io/${{ github.repository }}@${{ env.IMAGE_DIGEST }}
-            ```
+          preserve_order: true
+          body_path: ${{ steps.notes.outputs.body_path }}
