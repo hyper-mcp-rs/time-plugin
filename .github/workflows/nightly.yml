@@ -48,10 +48,17 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Install Rust toolchain from rust-toolchain.toml
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
+      - name: Activate rust-toolchain.toml toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup show
+
+      - name: Install wasm target
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-wasip1
 
       - name: Install cargo-auditable
         shell: bash
@@ -64,20 +71,6 @@ jobs:
           cargo fetch
           cargo auditable build --release --target wasm32-wasip1
           cp target/wasm32-wasip1/release/plugin.wasm ./plugin.wasm
-
-      - name: Record commit sha
-        id: meta
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugin-wasm
-          path: plugin.wasm
-          if-no-files-found: error
 
   package-and-push:
     name: Package + push multi-arch image + sign
