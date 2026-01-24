@@ -1,6 +1,6 @@
 [package]
 name = "time"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Time operations plugin for hyper-mcp - provides UTC time, time parsing, and time offset operations"
 license = "Apache-2.0"
