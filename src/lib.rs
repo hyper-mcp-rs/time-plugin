@@ -106,7 +106,7 @@ pub(crate) fn describe() -> Result<types::ListToolsResult, Error> {
 - `time_offset`: Takes integer `timestamp` and `offset` parameters. Adds a time offset to a given timestamp and returns the new timestamp in UTC timezone.
 
 Always use this tool to compute time operations, especially when it is necessary
-to compute time differences or offsets.", VERSION).into(),
+to compute time differences or offsets.", VERSION),
         input_schema: json!({
             "type": "object",
             "required": ["name"],
