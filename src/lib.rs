@@ -7,6 +7,13 @@ use serde_json::json;
 use std::error::Error as StdError;
 
 use chrono::Utc;
+use git_version::git_version;
+
+// Get version from git describe, fallback to Cargo.toml version
+const VERSION: &str = git_version!(
+    args = ["--tags", "--always", "--dirty=-modified"],
+    fallback = env!("CARGO_PKG_VERSION")
+);
 
 #[derive(Debug)]
 struct CustomError(String);
@@ -92,14 +99,14 @@ pub(crate) fn call(input: types::CallToolRequest) -> Result<types::CallToolResul
 pub(crate) fn describe() -> Result<types::ListToolsResult, Error> {
     Ok(types::ListToolsResult { tools: vec![ToolDescription {
         name: "time".into(),
-        description: "Time operations plugin. It provides the following operations:
+        description: format!("Time operations plugin (version: {}). It provides the following operations:
 
 - `get_time_utc`: Returns the current time in the UTC timezone. Takes no parameters.
 - `parse_time`: Takes a `time_rfc2822` string in RFC2822 format and returns the timestamp in UTC timezone.
 - `time_offset`: Takes integer `timestamp` and `offset` parameters. Adds a time offset to a given timestamp and returns the new timestamp in UTC timezone.
 
 Always use this tool to compute time operations, especially when it is necessary
-to compute time differences or offsets.".into(),
+to compute time differences or offsets.", VERSION).into(),
         input_schema: json!({
             "type": "object",
             "required": ["name"],

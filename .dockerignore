@@ -1,6 +1,8 @@
 # Created by https://www.toptal.com/developers/gitignore/api/linux,rust,terraform
 # Edit at https://www.toptal.com/developers/gitignore?templates=linux,rust,terraform
 
+# NOTE: .git directory is intentionally NOT ignored - it's needed for git-version during build
+
 ### Linux ###
 *~
 
