@@ -73,9 +73,8 @@ jobs:
             --tag "${IMAGE}:latest" \
             "${IMAGE}:latest-build"
 
-          # Get the manifest digest
-          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')
-          echo "IMAGE_DIGEST=${MANIFEST_DIGEST}" >> $GITHUB_ENV
+          # Get the manifest digest using the build output digest
+          echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Sign image by digest
         shell: bash
