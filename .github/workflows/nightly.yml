@@ -35,14 +35,19 @@ jobs:
         run: gh release delete nightly --yes || true
 
   build-plugin:
-    name: Build and sign nightly plugin
+    name: Build + sign nightly plugin image
     environment: staging
     needs: prepare-nightly-release
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       packages: write
-      id-token: write # needed for keyless signing
+      id-token: write # keyless signing
+
+    outputs:
+      nightly_digest: ${{ steps.digest.outputs.nightly_digest }}
+      nightly_ref: ${{ steps.meta.outputs.nightly_ref }}
+      body_path: ${{ steps.notes.outputs.body_path }}
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -59,6 +64,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Optional but recommended: BuildKit cache for faster nightlies
+      - name: Set up BuildKit cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.repository }}-nightly
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ github.repository }}-
+
       - name: Install cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
@@ -69,10 +83,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build WASM for both platforms at once
-      # WASM is platform-independent, so buildx creates proper multi-arch manifest automatically
+      - name: Compute image ref
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}"
+          echo "nightly_ref=${IMAGE}:nightly" >> "$GITHUB_OUTPUT"
+
+      # Build multi-arch image (must contain /plugin.wasm inside the layer tar.gz to match your puller)
       - name: Build and push multi-arch plugin image
-        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -80,29 +100,35 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: false
           tags: |
-            ghcr.io/${{ github.repository }}:nightly
+            ${{ steps.meta.outputs.nightly_ref }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Get manifest digest for signing
+      - name: Move BuildKit cache (for next run)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Resolve nightly multi-arch digest
+        id: digest
         shell: bash
         run: |
           set -euo pipefail
 
-          IMAGE="ghcr.io/${{ github.repository }}"
+          nightly_ref="${{ steps.meta.outputs.nightly_ref }}"
+          nightly_digest="$(docker buildx imagetools inspect "$nightly_ref" --format '{{.Digest}}')"
 
-          # Get the manifest list digest for signing
-          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE}:nightly" --format '{{json .Manifest}}' | jq -r '.digest')
-          echo "IMAGE_DIGEST=${MANIFEST_DIGEST}" >> $GITHUB_ENV
+          echo "nightly_digest=$nightly_digest" >> "$GITHUB_OUTPUT"
+          echo "Resolved nightly digest: $nightly_digest"
 
-      - name: Sign manifest list by digest
+      - name: Sign nightly manifest by digest (prevents retag “moving” signatures)
         shell: bash
         run: |
           set -euo pipefail
-
-          MANIFEST_DIGEST="${{ env.IMAGE_DIGEST }}"
           IMAGE="ghcr.io/${{ github.repository }}"
-
-          echo "Signing multi-arch manifest list ${IMAGE}@${MANIFEST_DIGEST}"
-          cosign sign --yes "${IMAGE}@${MANIFEST_DIGEST}"
+          cosign sign --yes "${IMAGE}@${{ steps.digest.outputs.nightly_digest }}"
 
       - name: Write release notes (with immutable digest)
         id: notes
@@ -111,7 +137,7 @@ jobs:
           set -euo pipefail
 
           IMAGE="ghcr.io/${{ github.repository }}"
-          NIGHTLY_DIGEST="${{ env.IMAGE_DIGEST }}"
+          DIGEST="${{ steps.digest.outputs.nightly_digest }}"
           SHA="${GITHUB_SHA}"
 
           cat > release-body.md <<EOF
@@ -124,22 +150,34 @@ jobs:
           - \`${IMAGE}:nightly\`
 
           ✅ Immutable digest (recommended for pinning):
-          - \`${IMAGE}@${NIGHTLY_DIGEST}\`
+          - \`${IMAGE}@${DIGEST}\`
 
           All container images are signed with Cosign. Verify the **immutable digest** with:
 
           \`\`\`bash
           cosign verify \
-            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/nightly.yml@refs/heads/main" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            ${IMAGE}@${NIGHTLY_DIGEST}
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/nightly.yml@refs/heads/main" \
+            --certificate-oidc-issuer-regexp "https://token.actions.githubusercontent.com" \
+            ${IMAGE}@${DIGEST}
           \`\`\`
           EOF
 
           echo "body_path=release-body.md" >> "$GITHUB_OUTPUT"
 
+  publish-nightly-release:
+    name: Publish nightly GitHub Release
+    needs: build-plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (for release-body file)
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: nightly
+          fetch-depth: 0
+
       - name: Create new nightly release
-        id: create_release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: nightly
@@ -148,4 +186,4 @@ jobs:
           prerelease: true
           generate_release_notes: true
           preserve_order: true
-          body_path: ${{ steps.notes.outputs.body_path }}
+          body_path: release-body.md
