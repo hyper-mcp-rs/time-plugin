@@ -48,17 +48,20 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Activate rust-toolchain.toml toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup show
+      - name: Install Rust 1.92 toolchain + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.92"
+          components: rustc rust-std cargo clippy rustfmt
+          targets: wasm32-wasip1
 
-      - name: Install wasm target
+      - name: Show active toolchain
         shell: bash
         run: |
           set -euo pipefail
-          rustup target add wasm32-wasip1
+          rustc -Vv
+          cargo -V
+          rustup target list --installed
 
       - name: Install cargo-auditable
         shell: bash
@@ -71,6 +74,12 @@ jobs:
           cargo fetch
           cargo auditable build --release --target wasm32-wasip1
           cp target/wasm32-wasip1/release/plugin.wasm ./plugin.wasm
+
+      - name: Ensure plugin.wasm exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh ./plugin.wasm
 
       - name: Record commit sha
         id: meta
@@ -146,10 +155,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nightly_ref="${{ steps.meta.outputs.nightly_ref }}"
-          nightly_digest="$(docker buildx imagetools inspect "$nightly_ref" --format '{{.Digest}}')"
-          echo "nightly_digest=$nightly_digest" >> "$GITHUB_OUTPUT"
-          echo "Resolved nightly digest: $nightly_digest"
+          IMAGE="ghcr.io/${{ github.repository }}"
+
+          nightly_digest="$(
+            docker buildx imagetools inspect "${IMAGE}:nightly" \
+              | awk -F': *' 'tolower($1)=="digest" {print $2; exit}'
+          )"
+
+          if [[ -z "${nightly_digest}" ]]; then
+            echo "Failed to resolve digest from buildx output" >&2
+            docker buildx imagetools inspect "${IMAGE}:nightly" || true
+            exit 1
+          fi
+
+          echo "nightly_digest=${nightly_digest}" >> "$GITHUB_OUTPUT"
+          echo "Resolved nightly digest: ${nightly_digest}"
 
       - name: Sign nightly manifest by digest
         shell: bash
