@@ -41,26 +41,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build for multi-arch (WASM is arch-independent, buildx handles efficiently)
+      # Build WASM once on amd64 (WASM is platform-independent, runs on any arch)
       - name: Build and push plugin image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           provenance: false
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-build
+            ghcr.io/${{ github.repository }}:latest-build
 
-      - name: Get image digest
+      - name: Create multi-platform manifests (same image for both archs)
         shell: bash
         run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository }}"
+          TAG="${{ github.ref_name }}"
           DIGEST="${{ steps.build.outputs.digest }}"
-          echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
+
+          # Use buildx imagetools to create manifests with same digest for both platforms
+          # Since WASM is platform-independent, both amd64 and arm64 use the same image
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${TAG}" \
+            "${IMAGE}:${TAG}-build"
+
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:latest-build"
+
+          # Get the manifest digest
+          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')
+          echo "IMAGE_DIGEST=${MANIFEST_DIGEST}" >> $GITHUB_ENV
 
       - name: Sign image by digest
         shell: bash
