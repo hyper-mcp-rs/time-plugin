@@ -69,31 +69,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build WASM once (arch-independent) and create multi-arch manifest
-      - name: Build and push plugin image (single arch, WASM is arch-independent)
+      # Build for multi-arch (WASM is arch-independent, buildx handles efficiently)
+      - name: Build and push plugin image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
           tags: |
-            ghcr.io/${{ github.repository }}:nightly-amd64
+            ghcr.io/${{ github.repository }}:nightly
 
-      - name: Create multi-arch manifest
+      - name: Get image digest
         shell: bash
         run: |
-          set -euo pipefail
-
-          IMAGE="ghcr.io/${{ github.repository }}"
-
-          # Create multi-arch manifest for nightly tag
-          docker buildx imagetools create -t "${IMAGE}:nightly" \
-            "${IMAGE}:nightly-amd64" \
-            "${IMAGE}:nightly-amd64"
-
-          # Get the manifest digest
-          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:nightly" --format '{{json .}}' | grep -o '"digest":"sha256:[a-f0-9]*"' | head -1 | cut -d'"' -f4)
+          DIGEST="${{ steps.build.outputs.digest }}"
           echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Sign image by digest

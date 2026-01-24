@@ -41,37 +41,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push plugin image (single arch, WASM is arch-independent)
+      # Build for multi-arch (WASM is arch-independent, buildx handles efficiently)
+      - name: Build and push plugin image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-amd64
-            ghcr.io/${{ github.repository }}:latest-amd64
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
 
-      - name: Create multi-arch manifest
+      - name: Get image digest
         shell: bash
         run: |
-          set -euo pipefail
-
-          IMAGE="ghcr.io/${{ github.repository }}"
-          TAG="${{ github.ref_name }}"
-
-          # Create multi-arch manifest for version tag
-          docker buildx imagetools create -t "${IMAGE}:${TAG}" \
-            "${IMAGE}:${TAG}-amd64" \
-            "${IMAGE}:${TAG}-amd64"
-
-          # Create multi-arch manifest for latest tag
-          docker buildx imagetools create -t "${IMAGE}:latest" \
-            "${IMAGE}:latest-amd64" \
-            "${IMAGE}:latest-amd64"
-
-          # Get the manifest digest
-          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{json .}}' | grep -o '"digest":"sha256:[a-f0-9]*"' | head -1 | cut -d'"' -f4)
+          DIGEST="${{ steps.build.outputs.digest }}"
           echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
 
       - name: Sign image by digest
