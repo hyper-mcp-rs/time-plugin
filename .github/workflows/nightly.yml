@@ -156,20 +156,20 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="ghcr.io/${{ github.repository }}"
+          REF="${IMAGE}:nightly"
 
           nightly_digest="$(
-            docker buildx imagetools inspect "${IMAGE}:nightly" \
-              | awk -F': *' 'tolower($1)=="digest" {print $2; exit}'
+            docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])'
           )"
 
-          if [[ -z "${nightly_digest}" ]]; then
-            echo "Failed to resolve digest from buildx output" >&2
-            docker buildx imagetools inspect "${IMAGE}:nightly" || true
+          if [[ ! "$nightly_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Invalid digest: '$nightly_digest'" >&2
             exit 1
           fi
 
-          echo "nightly_digest=${nightly_digest}" >> "$GITHUB_OUTPUT"
-          echo "Resolved nightly digest: ${nightly_digest}"
+          echo "nightly_digest=$nightly_digest" >> "$GITHUB_OUTPUT"
+          echo "Resolved nightly digest: $nightly_digest"
 
       - name: Sign nightly manifest by digest
         shell: bash
